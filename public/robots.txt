@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+# Block internal Next.js routes
+Disallow: /_next/
+Disallow: /api/
+
+Sitemap: https://www.eventbrite.in/sitemap.xml
