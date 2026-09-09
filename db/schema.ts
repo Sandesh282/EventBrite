@@ -117,7 +117,7 @@ export const contactEnquiries = pgTable("contact_enquiries", {
   service:   text("service"),                                        // e.g. "Sales Lounge"
   message:   text("message").notNull(),
   status:    enquiryStatusEnum("status").notNull().default("new"),   // lifecycle state
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 })
 
 export type ContactEnquiry = typeof contactEnquiries.$inferSelect
