@@ -1,0 +1,55 @@
+/**
+ * lib/validators.ts — Zod schemas for all API inputs.
+ *
+ * Centralising validation here means every route handler gets
+ * the same error shape and the schemas are easy to find during
+ * code reviews or interview walkthroughs.
+ */
+
+import { z } from "zod"
+
+// ---------------------------------------------------------------------------
+// GET /api/events — query param schema
+//
+// Key design decisions:
+//   • z.coerce.number() — query params arrive as strings; coerce converts safely.
+//   • limit clamped via .transform() not .max() — returning clamped data is more
+//     client-friendly than rejecting the request. Classic interviewer question:
+//     "what stops a client from passing limit=99999?"
+//   • page minimum 1 — negative or zero pages are nonsensical; reject them early.
+// ---------------------------------------------------------------------------
+export const GetEventsQuerySchema = z.object({
+  page:     z.coerce.number().int().min(1).default(1),
+  limit:    z.coerce.number().int().min(1).default(12)
+              .transform((val) => Math.min(val, 50)), // clamp to max 50, never reject
+  category: z.string().min(1).optional(),             // category slug, e.g. "corporate-event"
+  q:        z.string().min(1).optional(),             // ILIKE search on event name
+})
+
+export type GetEventsQuery = z.infer<typeof GetEventsQuerySchema>
+
+// ---------------------------------------------------------------------------
+// POST /api/events — request body schema
+//
+// Key design decisions:
+//   • slug regex: /^[a-z0-9-]+$/ — enforces URL-safe slugs at validation time,
+//     not just "hope the client does it right".
+//   • thumbnail / images startsWith("/images/") — prevents storing external URLs
+//     or absolute paths; all media lives under /public/images/.
+//   • images max 50 — prevents accidental unbounded inserts in the images loop.
+// ---------------------------------------------------------------------------
+export const CreateEventBodySchema = z.object({
+  slug:        z.string().min(2)
+                 .regex(/^[a-z0-9-]+$/, "Slug must be lowercase alphanumeric with hyphens only"),
+  name:        z.string().min(2).max(200),
+  description: z.string().min(10).max(2000),
+  thumbnail:   z.string().startsWith("/images/", "Thumbnail must be a relative /images/ path"),
+  categoryId:  z.number().int().positive(),
+  venueId:     z.number().int().positive().optional(), // optional — not all events have a venue
+  images:      z
+    .array(z.string().startsWith("/images/", "Each image must be a relative /images/ path"))
+    .min(1, "At least one image is required")
+    .max(50, "Maximum 50 images per event"),
+})
+
+export type CreateEventBody = z.infer<typeof CreateEventBodySchema>
