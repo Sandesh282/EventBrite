@@ -5,7 +5,7 @@
  *               events ──< event_images
  */
 
-import { pgTable, serial, text, integer, timestamp } from "drizzle-orm/pg-core"
+import { pgTable, serial, text, integer, timestamp, pgEnum } from "drizzle-orm/pg-core"
 import { relations } from "drizzle-orm"
 
 // ---------------------------------------------------------------------------
@@ -91,3 +91,35 @@ export const eventsRelations = relations(events, ({ one, many }) => ({
 export const eventImagesRelations = relations(eventImages, ({ one }) => ({
   event: one(events, { fields: [eventImages.eventId], references: [events.id] }),
 }))
+
+// ---------------------------------------------------------------------------
+// enquiry_status — tracks the lifecycle of an inbound contact submission.
+// Using a DB enum (not plain text) so invalid states are rejected at the DB
+// level and the set of valid transitions is self-documenting.
+// ---------------------------------------------------------------------------
+export const enquiryStatusEnum = pgEnum("enquiry_status", ["new", "read", "replied"])
+
+// ---------------------------------------------------------------------------
+// contact_enquiries — persists every submission from POST /api/contact.
+//
+// Design decisions:
+//   • phone is optional — not all visitors are comfortable sharing it.
+//   • service is a free-text label (e.g. "Sales Lounge") rather than an FK
+//     to a services table; services are static catalogue data, not DB rows.
+//   • status defaults to "new" so the team can filter unread leads easily.
+//   • No FK back to events/categories — enquiries are independent leads.
+// ---------------------------------------------------------------------------
+export const contactEnquiries = pgTable("contact_enquiries", {
+  id:        serial("id").primaryKey(),
+  name:      text("name").notNull(),
+  email:     text("email").notNull(),
+  phone:     text("phone"),                                          // optional
+  service:   text("service"),                                        // e.g. "Sales Lounge"
+  message:   text("message").notNull(),
+  status:    enquiryStatusEnum("status").notNull().default("new"),   // lifecycle state
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+})
+
+export type ContactEnquiry = typeof contactEnquiries.$inferSelect
+export type NewContactEnquiry = typeof contactEnquiries.$inferInsert
+
