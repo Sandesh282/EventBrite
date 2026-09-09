@@ -53,3 +53,42 @@ export const CreateEventBodySchema = z.object({
 })
 
 export type CreateEventBody = z.infer<typeof CreateEventBodySchema>
+
+// ---------------------------------------------------------------------------
+// POST /api/contact — request body schema
+//
+// Key design decisions:
+//   • z.email() — uses Zod's built-in RFC-compliant email parser; no regex needed.
+//   • phone regex — accepts international formats (+91 9876543210, 9876543210)
+//     while rejecting obvious garbage. Optional field, so only validated when present.
+//   • service enum — enforces the studio's 5 real service verticals at the API
+//     boundary; prevents arbitrary strings entering the DB.
+//   • message min(10) — filters out accidental button presses; max(2000) prevents
+//     payload abuse.
+// ---------------------------------------------------------------------------
+export const SERVICE_OPTIONS = [
+  "Experience Centre",
+  "Marketing Office",
+  "Project Office",
+  "Show Apartment",
+  "Sample-Up Apartment",
+  "Other",
+] as const
+
+export const ContactEnquiryBodySchema = z.object({
+  name:    z.string().min(2, "Name must be at least 2 characters").max(100),
+  email:   z.string().email("Please enter a valid email address"),
+  phone:   z
+    .string()
+    .regex(
+      /^(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3,4}[-.\s]?\d{4}$/,
+      "Please enter a valid phone number"
+    )
+    .optional()
+    .or(z.literal("")),   // allow empty string from uncontrolled inputs
+  service: z.enum(SERVICE_OPTIONS).optional(),
+  message: z.string().min(10, "Message must be at least 10 characters").max(2000),
+})
+
+export type ContactEnquiryBody = z.infer<typeof ContactEnquiryBodySchema>
+
