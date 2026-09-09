@@ -1,11 +1,24 @@
-"use client"
+/**
+ * app/events/page.tsx — Events index (server component).
+ *
+ * Fetches all categories directly from the DB (no fetch() round-trip —
+ * server components can query the DB inline). Categories are returned
+ * with the first event's thumbnail for use as the card background.
+ *
+ * force-dynamic prevents Next.js from statically pre-rendering this
+ * page at build time (which would fail without DATABASE_URL in CI).
+ * Every request gets fresh data from Neon.
+ */
 
-import { useState } from "react"
+export const dynamic = "force-dynamic"
+
 import Link from "next/link"
+import Image from "next/image"
+import { asc } from "drizzle-orm"
+import { db } from "@/db"
+import * as schema from "@/db/schema"
 import { Footer } from "@/components/footer"
 import { ScrollHeader } from "@/components/scroll-header"
-import { EVENT_CATEGORIES } from "@/lib/events"
-import Image from "next/image"
 
 function getColSpan(i: number, total: number) {
   const rem = total % 3
@@ -21,8 +34,19 @@ function getAspect(i: number, total: number) {
   return "aspect-[4/3]"
 }
 
-export default function EventsPage() {
-  const categories = EVENT_CATEGORIES
+export default async function EventsPage() {
+  // Fetch all categories with their first event thumbnail.
+  // Correlated subquery in SQL: one round-trip, no N+1.
+  const categories = await db.query.categories.findMany({
+    orderBy: [asc(schema.categories.id)],
+    with: {
+      events: {
+        limit: 1,                          // only need thumbnail from first event
+        columns: { thumbnail: true },
+        orderBy: [asc(schema.events.id)],
+      },
+    },
+  })
 
   return (
     <>
@@ -52,13 +76,13 @@ export default function EventsPage() {
             const aspect  = getAspect(i, categories.length)
             return (
               <Link
-                key={cat.categorySlug}
-                href={`/events/${cat.categorySlug}`}
+                key={cat.slug}
+                href={`/events/${cat.slug}`}
                 className={`sl-card ${colSpan} ${aspect} group relative overflow-hidden bg-neutral-200 cursor-pointer`}
               >
                 <Image
                   src={cat.events[0]?.thumbnail || "/images/placeholder.jpg"}
-                  alt={cat.category}
+                  alt={cat.name}
                   fill
                   className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 ease-[cubic-bezier(.25,.46,.45,.94)] group-hover:scale-[1.05]"
                   quality={90}
@@ -67,7 +91,7 @@ export default function EventsPage() {
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors duration-500" />
                 <div className="absolute bottom-0 left-0 right-0 p-4 md:p-5">
                   <p className="text-[8px] md:text-[9px] uppercase tracking-[0.4em] text-white/50 mb-1 md:mb-1.5 font-light">Experience</p>
-                  <h2 className="text-white text-xs md:text-sm font-medium uppercase tracking-[0.08em] leading-snug">{cat.category}</h2>
+                  <h2 className="text-white text-xs md:text-sm font-medium uppercase tracking-[0.08em] leading-snug">{cat.name}</h2>
                 </div>
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <div className="h-px w-0 group-hover:w-10 bg-white/35 transition-all duration-500 delay-100" />

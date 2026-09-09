@@ -1,13 +1,25 @@
-"use client"
+/**
+ * app/events/[categorySlug]/page.tsx — Category event grid (server component).
+ *
+ * Receives categorySlug via params (App Router pattern for async params).
+ * Queries DB for the category + its events in one relational fetch.
+ * force-dynamic: fresh data on every request, no build-time pre-render.
+ */
 
-import { useParams } from "next/navigation"
+export const dynamic = "force-dynamic"
+
+import { notFound } from "next/navigation"
 import Link from "next/link"
+import Image from "next/image"
+import { eq, asc } from "drizzle-orm"
+import { db } from "@/db"
+import * as schema from "@/db/schema"
 import { Footer } from "@/components/footer"
 import { ScrollHeader } from "@/components/scroll-header"
-import { getCategoryBySlug } from "@/lib/events"
-import { notFound } from "next/navigation"
-import Image from "next/image"
-import { motion } from "framer-motion"
+
+type Props = {
+  params: Promise<{ categorySlug: string }>
+}
 
 function getColSpan(i: number, total: number) {
   const rem = total % 3
@@ -23,12 +35,22 @@ function getAspect(i: number, total: number) {
   return "aspect-[4/3]"
 }
 
-export default function CategoryPage() {
-  const { categorySlug } = useParams()
-  const category = getCategoryBySlug(categorySlug as string)
+export default async function CategoryPage({ params }: Props) {
+  const { categorySlug } = await params
+
+  // Fetch category + all its events in one query using Drizzle relations
+  const category = await db.query.categories.findFirst({
+    where: eq(schema.categories.slug, categorySlug),
+    with: {
+      events: {
+        columns: { slug: true, name: true, thumbnail: true },
+        orderBy: [asc(schema.events.id)],
+      },
+    },
+  })
 
   if (!category) {
-    return notFound()
+    notFound()
   }
 
   const list = category.events
@@ -41,10 +63,10 @@ export default function CategoryPage() {
         <header className="pt-28 pb-10 px-10 md:px-16 flex items-end justify-between border-b border-neutral-100">
           <div>
             <p className="text-[9px] uppercase tracking-[0.5em] text-neutral-400 mb-3">
-              <Link href="/events" className="hover:text-neutral-900 transition-colors">Events</Link> / {category.category}
+              <Link href="/events" className="hover:text-neutral-900 transition-colors">Events</Link> / {category.name}
             </p>
             <h1 className="text-[clamp(2.5rem,6vw,5rem)] font-light text-neutral-900 leading-none tracking-[-0.02em]">
-              {category.category}
+              {category.name}
             </h1>
           </div>
           <div className="hidden md:block text-right">
@@ -60,11 +82,11 @@ export default function CategoryPage() {
             return (
               <Link
                 key={event.slug}
-                href={`/events/${category.categorySlug}/${event.slug}`}
+                href={`/events/${category.slug}/${event.slug}`}
                 className={`sl-card ${colSpan} ${aspect} group relative overflow-hidden bg-neutral-200 cursor-pointer`}
               >
-                <Image 
-                  src={event.thumbnail} 
+                <Image
+                  src={event.thumbnail}
                   alt={event.name}
                   fill
                   className="absolute inset-0 w-full h-full object-cover transition-all duration-700 scale-100 group-hover:scale-110"
@@ -96,8 +118,8 @@ export default function CategoryPage() {
         </div>
 
         <article className="max-w-5xl mx-auto px-10 md:px-16 py-24 border-t border-neutral-100">
-           <section>
-            <p className="text-[9px] uppercase tracking-[0.5em] text-neutral-300 mb-6">About {category.category}</p>
+          <section>
+            <p className="text-[9px] uppercase tracking-[0.5em] text-neutral-300 mb-6">About {category.name}</p>
             <p className="text-2xl md:text-3xl lg:text-4xl font-light text-neutral-700 leading-[1.5]">
               {category.description}
             </p>
