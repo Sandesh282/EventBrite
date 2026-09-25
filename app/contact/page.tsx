@@ -49,7 +49,7 @@ function ContactForm() {
 
       const json = await res.json()
 
-      if (!res.ok || !json.success) {
+      if (!res.ok || !json.data) {
         // Surface a human-readable error: prefer the server message, fall back
         // to a generic one so the form always shows something actionable.
         setServerError(json.error ?? "Something went wrong. Please try again.")
@@ -246,9 +246,9 @@ export default function ContactPage() {
               {/* Left: Contact Info + Form */}
               <div className="space-y-10">
                 <div>
-                  <h2 className="text-4xl font-bold text-foreground mb-4">Send an Enquiry</h2>
+                  <h2 className="text-4xl font-bold text-foreground mb-4">Visit Our Office</h2>
                   <p className="text-muted-foreground text-lg">
-                    Fill in the form and we&apos;ll get back to you within 24 hours.
+                    We&apos;re here to help bring your vision to life
                   </p>
                 </div>
 
@@ -258,12 +258,12 @@ export default function ContactPage() {
                     href="https://maps.google.com/?cid=6948313269780121510"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="group flex items-start gap-4 p-5 bg-card hover:bg-muted/50 rounded-2xl transition-all border border-border hover:border-amber-300"
+                    className="group flex items-start gap-4 p-6 bg-card hover:bg-muted/50 rounded-2xl transition-all border border-border hover:border-amber-300"
                   >
-                    <MapPin className="w-5 h-5 text-amber-600 mt-1 flex-shrink-0" />
+                    <MapPin className="w-6 h-6 text-amber-600 mt-1 flex-shrink-0" />
                     <div>
-                      <h3 className="font-semibold text-foreground mb-1">Head Office</h3>
-                      <p className="text-muted-foreground text-sm leading-relaxed">
+                      <h3 className="font-semibold text-foreground mb-2">Head Office</h3>
+                      <p className="text-muted-foreground leading-relaxed">
                         F-74, F-75, F-76, first floor<br />
                         Kohinoor City Mall, LBS Road<br />
                         Kurla, Mumbai - 400070
@@ -273,12 +273,12 @@ export default function ContactPage() {
 
                   <a
                     href="tel:+919833854321"
-                    className="group flex items-start gap-4 p-5 bg-card hover:bg-muted/50 rounded-2xl transition-all border border-border hover:border-amber-300"
+                    className="group flex items-start gap-4 p-6 bg-card hover:bg-muted/50 rounded-2xl transition-all border border-border hover:border-amber-300"
                   >
-                    <Phone className="w-5 h-5 text-amber-600 mt-1 flex-shrink-0" />
+                    <Phone className="w-6 h-6 text-amber-600 mt-1 flex-shrink-0" />
                     <div>
-                      <h3 className="font-semibold text-foreground mb-1">Phone</h3>
-                      <p className="text-muted-foreground text-sm">+91 9833854321</p>
+                      <h3 className="font-semibold text-foreground mb-2">Phone</h3>
+                      <p className="text-muted-foreground">+91 9833854321</p>
                     </div>
                   </a>
 
@@ -299,7 +299,7 @@ export default function ContactPage() {
 
               {/* Right: Map */}
               <div className="lg:sticky lg:top-24 h-fit">
-                <div className="rounded-2xl overflow-hidden shadow-2xl border border-border h-[700px]">
+                <div className="rounded-2xl overflow-hidden shadow-2xl border border-border h-[600px]">
                   <iframe
                     src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3770.8267891234567!2d72.8777!3d19.0760!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3be7c8e5e5e5e5e5%3A0x606e5e5e5e5e5e5e!2sKohinoor%20City%20Mall!5e0!3m2!1sen!2sin!4v1234567890123!5m2!1sen!2sin"
                     width="100%"
