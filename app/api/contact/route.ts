@@ -4,14 +4,9 @@
  * POST /api/contact  — submit a new enquiry (public, no auth required)
  * GET  /api/contact  — list all enquiries (auth-protected, for internal use)
  *
- * Response envelope (all endpoints):
- *   Success → { success: true,  data: T }
- *   Error   → { success: false, error: string, details?: ZodFlatError }
- *
- * This standardised envelope is a deliberate design choice: it lets any
- * consumer (front-end, internal tools, automated tests) branch on `success`
- * without inspecting HTTP status codes, while status codes are still set
- * correctly for HTTP-level tooling (curl, monitoring, load balancers).
+ * Response envelope matches /api/events:
+ *   Success → { data: T }
+ *   Error   → { error: string, details?: ZodFlatError }
  */
 
 import { NextRequest, NextResponse } from "next/server"
@@ -19,27 +14,6 @@ import { desc, eq } from "drizzle-orm"
 import { db } from "@/db"
 import * as schema from "@/db/schema"
 import { ContactEnquiryBodySchema } from "@/lib/validators"
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Uniform success response wrapper */
-function ok<T>(data: T, status = 200) {
-  return NextResponse.json({ success: true, data }, { status })
-}
-
-/** Uniform error response wrapper */
-function fail(error: string, status: number, details?: unknown) {
-  return NextResponse.json({ success: false, error, ...(details ? { details } : {}) }, { status })
-}
-
-/** Verify the Authorization: Bearer <token> header against API_SECRET_KEY */
-function isAuthorised(req: NextRequest): boolean {
-  const authHeader = req.headers.get("authorization") ?? ""
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : ""
-  return !!process.env.API_SECRET_KEY && token === process.env.API_SECRET_KEY
-}
 
 // ---------------------------------------------------------------------------
 // POST /api/contact
@@ -59,7 +33,7 @@ export async function POST(req: NextRequest) {
   try {
     rawBody = await req.json()
   } catch {
-    return fail("Invalid JSON body", 400)
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
   }
 
   // --- Zod validation -------------------------------------------------------
@@ -68,7 +42,10 @@ export async function POST(req: NextRequest) {
   // without a second round-trip to figure out which field failed.
   const parsed = ContactEnquiryBodySchema.safeParse(rawBody)
   if (!parsed.success) {
-    return fail("Validation failed", 400, parsed.error.flatten())
+    return NextResponse.json(
+      { error: "Validation failed", details: parsed.error.flatten() },
+      { status: 400 }
+    )
   }
 
   const { name, email, phone, service, message } = parsed.data
@@ -92,7 +69,7 @@ export async function POST(req: NextRequest) {
       createdAt: schema.contactEnquiries.createdAt,
     })
 
-  return ok({ id: enquiry.id, createdAt: enquiry.createdAt }, 201)
+  return NextResponse.json({ data: { id: enquiry.id, createdAt: enquiry.createdAt } }, { status: 201 })
 }
 
 // ---------------------------------------------------------------------------
@@ -110,8 +87,13 @@ export async function POST(req: NextRequest) {
 // ---------------------------------------------------------------------------
 export async function GET(req: NextRequest) {
   // --- Auth check -----------------------------------------------------------
-  if (!isAuthorised(req)) {
-    return fail("Unauthorized", 401)
+  // Simple Bearer token auth — sufficient for a portfolio API.
+  // Production would use JWTs or OAuth, but the pattern is identical.
+  const authHeader = req.headers.get("authorization") ?? ""
+  const token      = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : ""
+
+  if (!process.env.API_SECRET_KEY || token !== process.env.API_SECRET_KEY) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
   // --- Optional status filter -----------------------------------------------
@@ -133,5 +115,5 @@ export async function GET(req: NextRequest) {
     .where(statusFilter ? eq(schema.contactEnquiries.status, statusFilter) : undefined)
     .orderBy(desc(schema.contactEnquiries.createdAt))
 
-  return ok(rows)
+  return NextResponse.json({ data: rows })
 }
