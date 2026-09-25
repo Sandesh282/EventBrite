@@ -53,23 +53,30 @@ export async function POST(req: NextRequest) {
   // --- DB insert ------------------------------------------------------------
   // Inserting a single row — no transaction needed (no related tables).
   // .returning() avoids a second SELECT and gives us the generated id + timestamp.
-  const [enquiry] = await db
-    .insert(schema.contactEnquiries)
-    .values({
-      name,
-      email,
-      // Normalise: treat empty string the same as absent (store NULL)
-      phone:   phone && phone.trim() !== "" ? phone.trim() : null,
-      service: service ?? null,
-      message: message.trim(),
-      status:  "new",
-    })
-    .returning({
-      id:        schema.contactEnquiries.id,
-      createdAt: schema.contactEnquiries.createdAt,
-    })
+  // Wrapped in try/catch so a DB failure returns a proper JSON 500 rather than
+  // an unhandled rejection that Next.js surfaces as an HTML error page.
+  try {
+    const [enquiry] = await db
+      .insert(schema.contactEnquiries)
+      .values({
+        name,
+        email,
+        // Normalise: treat empty string the same as absent (store NULL)
+        phone:   phone && phone.trim() !== "" ? phone.trim() : null,
+        service: service ?? null,
+        message: message.trim(),
+        status:  "new",
+      })
+      .returning({
+        id:        schema.contactEnquiries.id,
+        createdAt: schema.contactEnquiries.createdAt,
+      })
 
-  return NextResponse.json({ data: { id: enquiry.id, createdAt: enquiry.createdAt } }, { status: 201 })
+    return NextResponse.json({ data: { id: enquiry.id, createdAt: enquiry.createdAt } }, { status: 201 })
+  } catch (err) {
+    console.error("[POST /api/contact] DB insert failed:", err)
+    return NextResponse.json({ error: "Failed to save enquiry. Please try again later." }, { status: 500 })
+  }
 }
 
 // ---------------------------------------------------------------------------
