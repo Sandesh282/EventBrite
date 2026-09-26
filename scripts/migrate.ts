@@ -1,9 +1,12 @@
 /**
  * scripts/migrate.ts
  *
- * Applies the contact_enquiries migration directly via the Neon HTTP driver.
+ * Applies all pending schema migrations directly via the Neon HTTP driver.
  * Use this instead of `drizzle-kit migrate` when running locally — drizzle-kit
  * requires a standard TCP postgres driver which isn't installed in this env.
+ *
+ * All migrations are idempotent (IF NOT EXISTS / DO $$ ... EXCEPTION blocks)
+ * so this script is safe to re-run at any time.
  *
  * Usage: npx tsx --env-file=.env.local scripts/migrate.ts
  */
@@ -21,17 +24,16 @@ const sql = neon(DATABASE_URL)
 async function migrate() {
   console.log("🔌  Connecting to Neon…")
 
-  // Step 1: Create the enum type (idempotent via IF NOT EXISTS)
-  console.log("▶   Creating enquiry_status enum…")
+  // ---------------------------------------------------------------------------
+  // Migration 0001 — enquiry_status enum + contact_enquiries table
+  // ---------------------------------------------------------------------------
+  console.log("▶   [0001] enquiry_status enum + contact_enquiries…")
   await sql`
     DO $$ BEGIN
       CREATE TYPE enquiry_status AS ENUM ('new', 'read', 'replied');
     EXCEPTION WHEN duplicate_object THEN NULL;
     END $$
   `
-
-  // Step 2: Create the contact_enquiries table (idempotent)
-  console.log("▶   Creating contact_enquiries table…")
   await sql`
     CREATE TABLE IF NOT EXISTS contact_enquiries (
       id         SERIAL PRIMARY KEY,
@@ -45,9 +47,61 @@ async function migrate() {
     )
   `
 
-  console.log("✅  Migration applied successfully.")
-  console.log("    Tables: contact_enquiries")
-  console.log("    Enums:  enquiry_status (new | read | replied)")
+  // ---------------------------------------------------------------------------
+  // Migration 0002 — users table
+  //
+  // password_hash stores a bcrypt hash (work factor >= 12).
+  // role TEXT (not enum) so the role set can expand without DDL ALTER TYPE.
+  // ---------------------------------------------------------------------------
+  console.log("▶   [0002] users table…")
+  await sql`
+    CREATE TABLE IF NOT EXISTS users (
+      id            SERIAL PRIMARY KEY,
+      email         TEXT NOT NULL UNIQUE,
+      name          TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      role          TEXT NOT NULL DEFAULT 'attendee',
+      created_at    TIMESTAMPTZ DEFAULT NOW()
+    )
+  `
+
+  // ---------------------------------------------------------------------------
+  // Migration 0003 — capacity, scheduling, and status columns on events
+  //
+  // capacity  NULL  = unlimited registrations.
+  // start_at/end_at = event scheduling. NOT NULL with defaults for backfill.
+  // status    TEXT  = event lifecycle ('draft'|'published'|'cancelled').
+  // ---------------------------------------------------------------------------
+  console.log("▶   [0003] events: capacity, start_at, end_at, status…")
+  await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS capacity INTEGER`
+  await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS start_at TIMESTAMPTZ NOT NULL DEFAULT '2024-01-01T09:00:00Z'`
+  await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS end_at   TIMESTAMPTZ NOT NULL DEFAULT '2024-12-31T23:59:00Z'`
+  await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS status   TEXT        NOT NULL DEFAULT 'published'`
+
+  // ---------------------------------------------------------------------------
+  // Migration 0004 — registrations table
+  //
+  // Unique index on (event_id, user_id) is the DB-level duplicate prevention.
+  // Soft-delete via status = 'cancelled' (no hard DELETEs on registrations).
+  // ---------------------------------------------------------------------------
+  console.log("▶   [0004] registrations table…")
+  await sql`
+    CREATE TABLE IF NOT EXISTS registrations (
+      id         SERIAL PRIMARY KEY,
+      event_id   INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      user_id    INTEGER NOT NULL REFERENCES users(id)  ON DELETE CASCADE,
+      status     TEXT    NOT NULL DEFAULT 'confirmed',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `
+  await sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS registrations_event_user_uidx
+      ON registrations(event_id, user_id)
+  `
+
+  console.log("✅  All migrations applied successfully.")
+  console.log("    Tables:  users, events (updated), registrations, contact_enquiries")
+  console.log("    Indexes: registrations_event_user_uidx")
 }
 
 migrate().catch((err) => {
