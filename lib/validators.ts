@@ -92,3 +92,42 @@ export const ContactEnquiryBodySchema = z.object({
 
 export type ContactEnquiryBody = z.infer<typeof ContactEnquiryBodySchema>
 
+// ---------------------------------------------------------------------------
+// POST /api/auth/register — request body schema
+//
+// Key decisions:
+//   • password min 8 — OWASP minimum; balance between usability and security.
+//   • role enum — only 'attendee' | 'organizer' accepted at the API boundary.
+//     The DB stores TEXT but we validate here so no arbitrary role strings enter.
+//   • email normalised to lowercase in the service layer (not here) — Zod
+//     validation should not have side effects.
+// ---------------------------------------------------------------------------
+export const RegisterBodySchema = z.object({
+  email:    z.string().email("Please enter a valid email address"),
+  name:     z.string().min(2, "Name must be at least 2 characters").max(100),
+  password: z.string().min(8, "Password must be at least 8 characters").max(100),
+  role:     z.enum(["attendee", "organizer"]).optional().default("attendee"),
+})
+
+export type RegisterBody = z.infer<typeof RegisterBodySchema>
+
+// ---------------------------------------------------------------------------
+// POST /api/auth/login — request body schema
+// ---------------------------------------------------------------------------
+export const LoginBodySchema = z.object({
+  email:    z.string().email("Please enter a valid email address"),
+  password: z.string().min(1, "Password is required"),
+})
+
+export type LoginBody = z.infer<typeof LoginBodySchema>
+
+// ---------------------------------------------------------------------------
+// POST /api/auth/refresh — body schema
+// Refresh token is read from httpOnly cookie in the route handler,
+// but we also support it in the body as a fallback (e.g. mobile clients).
+// ---------------------------------------------------------------------------
+export const RefreshBodySchema = z.object({
+  refreshToken: z.string().min(1).optional(),
+})
+
+export type RefreshBody = z.infer<typeof RefreshBodySchema>
