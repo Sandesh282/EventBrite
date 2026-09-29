@@ -92,7 +92,8 @@ async function main() {
 
   // Step 6: Pass ALL HTTP requests to Next.js
   // Express handles the HTTP upgrade (WebSocket) before Next.js sees it.
-  app.all("*", (req, res) => {
+  // Note: app.all("*") was removed in Express 5 — app.use() is the equivalent.
+  app.use((req, res) => {
     handle(req, res)
   })
 
