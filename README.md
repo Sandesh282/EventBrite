@@ -18,7 +18,7 @@
 
 ---
 
-## Engineering Overview
+## Overview
 
 EventBrite is a production-oriented full-stack event management platform. Beyond the product itself, it is built to demonstrate backend engineering depth — authentication, database design, concurrency control, real-time systems, testing, and observability.
 
@@ -49,8 +49,6 @@ Browser / API Client
 ```
 
 ---
-
-## Engineering Highlights
 
 ### Authentication — JWT two-token scheme
 - **Access token** (15 min, `JWT_SECRET`) — sent as `Authorization: Bearer <token>`
