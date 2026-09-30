@@ -1,0 +1,358 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "EventBrite API",
+    "version": "1.0.0",
+    "description": "EventBrite is a full-stack event management platform built with Next.js 16, Drizzle ORM, and Neon PostgreSQL.\n\n## Authentication\nMost mutation endpoints require a Bearer JWT access token (15 min TTL).\nObtain one via `POST /api/auth/login` or `POST /api/auth/register`.\nRefresh tokens are stored in httpOnly SameSite=Strict cookies and automatically rotated on each `/api/auth/refresh` call.\n\n## Concurrency\n`POST /api/events/:slug/register` uses `SELECT ... FOR UPDATE` row-level locking\nto prevent concurrent registrations from exceeding event capacity. A `UNIQUE(event_id, user_id)` index acts as a second line of defence.\n\n## Architecture\n`Route Handler → Service Layer → Repository Layer → Neon PostgreSQL`\n\nTyped error classes map directly to HTTP status codes. All request bodies are Zod-validated before reaching the service layer.",
+    "contact": {
+      "name": "Sandesh",
+      "url": "https://github.com/Sandesh282/EventBrite"
+    }
+  },
+  "servers": [
+    { "url": "https://www.eventbrite.in", "description": "Production (Vercel)" },
+    { "url": "http://localhost:3000", "description": "Local development" }
+  ],
+  "tags": [
+    { "name": "Authentication", "description": "JWT-based auth with bcrypt password hashing, httpOnly refresh cookies, and token rotation" },
+    { "name": "Events", "description": "Event listing and creation" },
+    { "name": "Registrations", "description": "Event registration with SELECT FOR UPDATE concurrency control" },
+    { "name": "Contact", "description": "Contact enquiry submission" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Access token obtained from POST /api/auth/login or /api/auth/register.\n- **TTL**: 15 minutes\n- **Algorithm**: HS256 (signed with JWT_SECRET)\n- **Usage**: `Authorization: Bearer <token>`\n- When expired, use POST /api/auth/refresh to obtain a new one"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": { "type": "string", "example": "Invalid email or password" }
+        }
+      },
+      "ValidationError": {
+        "type": "object",
+        "required": ["error", "details"],
+        "properties": {
+          "error": { "type": "string", "example": "Validation failed" },
+          "details": {
+            "type": "object",
+            "properties": {
+              "fieldErrors": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } } },
+              "formErrors": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "required": ["id", "email", "name", "role"],
+        "properties": {
+          "id":        { "type": "integer", "example": 1 },
+          "email":    { "type": "string", "format": "email", "example": "sandesh@example.com" },
+          "name":     { "type": "string", "example": "Sandesh" },
+          "role":     { "type": "string", "enum": ["attendee", "organizer"], "example": "attendee" },
+          "createdAt": { "type": "string", "format": "date-time", "nullable": true }
+        }
+      },
+      "AuthTokens": {
+        "type": "object",
+        "required": ["user", "accessToken"],
+        "properties": {
+          "user":        { "$ref": "#/components/schemas/User" },
+          "accessToken": {
+            "type": "string",
+            "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+            "description": "JWT access token. TTL: 15 minutes. Refresh token set as httpOnly cookie."
+          }
+        }
+      },
+      "Registration": {
+        "type": "object",
+        "required": ["id", "eventId", "userId", "status"],
+        "properties": {
+          "id":        { "type": "integer", "example": 42 },
+          "eventId":  { "type": "integer", "example": 7 },
+          "userId":   { "type": "integer", "example": 1 },
+          "status":   { "type": "string", "enum": ["confirmed", "cancelled"], "example": "confirmed" },
+          "createdAt": { "type": "string", "format": "date-time", "nullable": true }
+        }
+      },
+      "EventSummary": {
+        "type": "object",
+        "required": ["id", "slug", "name", "status"],
+        "properties": {
+          "id":          { "type": "integer" },
+          "slug":        { "type": "string", "example": "viacom" },
+          "name":        { "type": "string", "example": "Viacom" },
+          "description": { "type": "string" },
+          "thumbnail":   { "type": "string", "example": "/images/events/corporate event/Viacom/IMG_1.webp" },
+          "status":      { "type": "string", "enum": ["draft", "published", "cancelled"], "example": "published" },
+          "startAt":     { "type": "string", "format": "date-time" },
+          "endAt":       { "type": "string", "format": "date-time" },
+          "capacity":    { "type": "integer", "nullable": true, "description": "null = unlimited" },
+          "category": {
+            "type": "object",
+            "properties": {
+              "id":   { "type": "integer", "nullable": true },
+              "name": { "type": "string", "nullable": true },
+              "slug": { "type": "string", "nullable": true }
+            }
+          }
+        }
+      },
+      "PaginationMeta": {
+        "type": "object",
+        "required": ["page", "limit", "total", "totalPages"],
+        "properties": {
+          "page":       { "type": "integer", "example": 1 },
+          "limit":      { "type": "integer", "example": 12 },
+          "total":      { "type": "integer", "example": 48 },
+          "totalPages": { "type": "integer", "example": 4 }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/auth/register": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Create a new user account",
+        "description": "Registers a new user. Password is hashed with bcrypt (work factor 12).\n\nOn success: returns access token in response body + sets refresh token in httpOnly cookie.\n\nThe refresh token cookie is:\n- `HttpOnly` — not accessible to JavaScript (XSS protection)\n- `SameSite=Strict` — not sent cross-origin (CSRF protection)\n- `Path=/api/auth` — scoped to auth routes only\n- `MaxAge=604800` — 7 days",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "name", "password"],
+                "properties": {
+                  "email":    { "type": "string", "format": "email", "example": "user@example.com" },
+                  "name":     { "type": "string", "minLength": 2, "maxLength": 100, "example": "Sandesh" },
+                  "password": { "type": "string", "minLength": 8, "maxLength": 100, "example": "securepassword123" },
+                  "role":     { "type": "string", "enum": ["attendee", "organizer"], "default": "attendee" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Account created", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/AuthTokens" } } } } } },
+          "400": { "description": "Validation error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationError" } } } },
+          "409": { "description": "Email already registered", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Log in with email and password",
+        "description": "Verifies credentials and issues tokens.\n\n**Security**: Error message is intentionally generic ('Invalid email or password') regardless of whether the email exists — prevents user enumeration attacks. bcrypt.compare() is always called even for unknown emails to prevent timing-based enumeration.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password"],
+                "properties": {
+                  "email":    { "type": "string", "format": "email", "example": "user@example.com" },
+                  "password": { "type": "string", "example": "securepassword123" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Login successful", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/AuthTokens" } } } } } },
+          "401": { "description": "Invalid email or password", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/auth/refresh": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Refresh access token",
+        "description": "Issues a new 15-minute access token from a valid refresh token and **rotates** the refresh token (old one is replaced with a new 7-day token).\n\nToken rotation means: if a refresh token is stolen and used, the legitimate user's next refresh call fails, alerting them to re-login.\n\n**Token source** (priority order):\n1. `refresh_token` httpOnly cookie (browser clients)\n2. Request body `{ \"refreshToken\": \"...\" }` (mobile/API clients)",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "refreshToken": { "type": "string", "description": "Only required if not sending via cookie" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "New access token + rotated refresh cookie", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/AuthTokens" } } } } } },
+          "401": { "description": "Invalid or expired refresh token", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "tags": ["Authentication"],
+        "summary": "Get current user profile",
+        "description": "Returns the authenticated user's profile. `passwordHash` is never included in any response.",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "User profile", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/User" } } } } } },
+          "401": { "description": "Missing or expired access token", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "User no longer exists", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Log out",
+        "description": "Clears the httpOnly refresh token cookie by setting `MaxAge=0`.\n\nThe access token expires naturally after 15 minutes. Stateless JWTs cannot be revoked before expiry without a server-side store (e.g. Redis jti blocklist). The 15-minute TTL is the accepted exposure window.",
+        "responses": {
+          "200": { "description": "Logged out", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "type": "object", "properties": { "message": { "type": "string", "example": "Logged out successfully" } } } } } } } }
+        }
+      }
+    },
+    "/api/events": {
+      "get": {
+        "tags": ["Events"],
+        "summary": "List events (paginated, filterable)",
+        "parameters": [
+          { "in": "query", "name": "page",     "schema": { "type": "integer", "minimum": 1, "default": 1 }, "description": "Page number (1-indexed)" },
+          { "in": "query", "name": "limit",    "schema": { "type": "integer", "minimum": 1, "maximum": 50, "default": 12 }, "description": "Items per page (max 50)" },
+          { "in": "query", "name": "category", "schema": { "type": "string" }, "description": "Filter by category slug", "example": "corporate-event" },
+          { "in": "query", "name": "q",        "schema": { "type": "string" }, "description": "Case-insensitive ILIKE search on event name", "example": "viacom" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated event list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/EventSummary" } },
+                    "meta": { "$ref": "#/components/schemas/PaginationMeta" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Events"],
+        "summary": "Create a new event",
+        "description": "Admin-only. Requires `Authorization: Bearer <API_SECRET_KEY>` (not the user JWT).",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "201": { "description": "Event created", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "type": "object", "properties": { "id": { "type": "integer" }, "slug": { "type": "string" } } } } } } } },
+          "401": { "description": "Unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "Slug already exists", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/events/{slug}/register": {
+      "post": {
+        "tags": ["Registrations"],
+        "summary": "Register for an event",
+        "description": "Registers the authenticated user for the specified event.\n\n**Concurrency safety**: Uses `SELECT ... FOR UPDATE` row-level locking to prevent overselling. When two requests arrive simultaneously:\n1. First transaction acquires exclusive lock on the events row\n2. Second transaction blocks at the lock\n3. After first commits, second re-reads the updated count\n4. If count ≥ capacity, second throws `CapacityExceededError` (409)\n\nA `UNIQUE(event_id, user_id)` index acts as a second line of defence against duplicates.",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "in": "path", "name": "slug", "required": true, "schema": { "type": "string" }, "example": "viacom" }
+        ],
+        "responses": {
+          "201": { "description": "Registered successfully", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/Registration" } } } } } },
+          "400": { "description": "Event is closed, cancelled, or in the past", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "description": "Unauthenticated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "Event not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "Already registered or event at capacity", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "delete": {
+        "tags": ["Registrations"],
+        "summary": "Cancel registration",
+        "description": "Soft-cancels the registration (sets `status = 'cancelled'`). The row is preserved for organizer history — no hard deletes.",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "in": "path", "name": "slug", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Registration cancelled", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/Registration" } } } } } },
+          "401": { "description": "Unauthenticated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "Event or active registration not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/events/{slug}/registrations": {
+      "get": {
+        "tags": ["Registrations"],
+        "summary": "List all registrations for an event",
+        "description": "Returns all registrations with attendee user info. **Requires organizer role** — enforced by `requireRole(user, 'organizer')` middleware.",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "in": "path",  "name": "slug",   "required": true, "schema": { "type": "string" } },
+          { "in": "query", "name": "status", "schema": { "type": "string", "enum": ["confirmed", "cancelled"] }, "description": "Filter by registration status" }
+        ],
+        "responses": {
+          "200": { "description": "Registrations with user details", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "type": "array", "items": { "$ref": "#/components/schemas/Registration" } } } } } } },
+          "401": { "description": "Unauthenticated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "Organizer role required", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "Event not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/users/me/registrations": {
+      "get": {
+        "tags": ["Registrations"],
+        "summary": "Get current user's registrations",
+        "description": "Returns the authenticated user's registration history with event details joined.",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "in": "query", "name": "status", "schema": { "type": "string", "enum": ["confirmed", "cancelled"] } }
+        ],
+        "responses": {
+          "200": { "description": "User's registrations with event details", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "type": "array", "items": { "$ref": "#/components/schemas/Registration" } } } } } } },
+          "401": { "description": "Unauthenticated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/contact": {
+      "post": {
+        "tags": ["Contact"],
+        "summary": "Submit a contact enquiry",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "email", "message"],
+                "properties": {
+                  "name":    { "type": "string", "example": "Sandesh" },
+                  "email":   { "type": "string", "format": "email", "example": "sandesh@example.com" },
+                  "phone":   { "type": "string", "nullable": true, "example": "+91 98765 43210" },
+                  "service": { "type": "string", "nullable": true, "example": "Corporate Events" },
+                  "message": { "type": "string", "minLength": 10, "example": "We need help organising a corporate event for 500 people." }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Enquiry submitted", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "type": "object", "properties": { "id": { "type": "integer" }, "createdAt": { "type": "string", "format": "date-time", "nullable": true } } } } } } } },
+          "400": { "description": "Validation error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationError" } } } }
+        }
+      }
+    }
+  }
+}

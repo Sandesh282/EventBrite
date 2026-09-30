@@ -12,7 +12,8 @@
     "db:seed": "tsx --env-file=.env.local db/seed.ts",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "docs:preview": "npx @redocly/cli preview-docs http://localhost:3000/api/docs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
