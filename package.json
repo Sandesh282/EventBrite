@@ -9,7 +9,11 @@
     "lint": "eslint .",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:seed": "tsx --env-file=.env.local db/seed.ts"
+    "db:seed": "tsx --env-file=.env.local db/seed.ts",
+    "db:migrate": "tsx --env-file=.env.local scripts/migrate.ts",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
@@ -75,11 +79,13 @@
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@types/ws": "^8.18.2",
+    "@vitest/coverage-v8": "^5.0.2",
     "drizzle-kit": "^0.31.10",
     "postcss": "^8.5",
     "tailwindcss": "^4.2.0",
     "tsx": "^4.23.13",
     "tw-animate-css": "1.3.3",
-    "typescript": "5.7.3"
+    "typescript": "5.7.3",
+    "vitest": "^5.0.2"
   }
 }
