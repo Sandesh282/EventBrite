@@ -1,0 +1,64 @@
+# .github/workflows/concurrency.yml
+#
+# Concurrency test — runs on push to main (not on PRs).
+#
+# Requires DATABASE_URL secret set in GitHub repository settings:
+#   Settings → Secrets and variables → Actions → New repository secret
+#   Name:  DATABASE_URL
+#   Value: your Neon connection string
+#
+# Also requires JWT_SECRET and JWT_REFRESH_SECRET for the auth module
+# to initialise without throwing on import.
+#
+# Why not run on PRs?
+#   1. Database secrets should not be available to fork PRs (security risk)
+#   2. Concurrent DB tests are inherently flaky under high GitHub Actions load
+#   3. The unit tests already validate the service logic on PRs
+#   The concurrency test validates that the SELECT FOR UPDATE locking actually
+#   works end-to-end — it belongs in post-merge validation, not pre-merge gating.
+
+name: Concurrency Tests
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  concurrency-test:
+    name: SELECT FOR UPDATE — concurrent registration test
+    runs-on: ubuntu-latest
+
+    env:
+      DATABASE_URL:        ${{ secrets.DATABASE_URL }}
+      JWT_SECRET:          ${{ secrets.JWT_SECRET }}
+      JWT_REFRESH_SECRET:  ${{ secrets.JWT_REFRESH_SECRET }}
+      API_SECRET_KEY:      ${{ secrets.API_SECRET_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # -------------------------------------------------------------------
+      # Run the concurrency test against the real Neon DB.
+      #
+      # What this validates:
+      #   - SELECT ... FOR UPDATE actually prevents overselling under load
+      #   - Exactly `capacity` registrations confirmed when N > capacity fire
+      #   - All rejections are typed errors (no unexpected crashes)
+      #   - DB confirmed count verified independently post-race
+      #
+      # The test creates and cleans up isolated TEST_CONCURRENT_ prefixed rows.
+      # Timeout: 60s (30s for DB setup + 30s for the concurrent test itself)
+      # -------------------------------------------------------------------
+      - name: Concurrency test (SELECT FOR UPDATE)
+        run: npx vitest run __tests__/concurrency --reporter=verbose
+        timeout-minutes: 3
