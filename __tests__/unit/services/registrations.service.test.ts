@@ -47,11 +47,11 @@ function makeEvent(overrides: Partial<{
     venueId:     null,
     createdAt:   new Date(),
     updatedAt:   new Date(),
-    category:    null,
+    category:    { id: 1, name: "Test", slug: "test", description: "" },
     venue:       null,
     images:      [],
     ...overrides,
-  }
+  } as any
 }
 
 beforeEach(() => {
@@ -168,7 +168,7 @@ describe("registrations.service.cancel", () => {
 
   it("throws RegistrationNotFoundError when registration does not exist", async () => {
     vi.mocked(eventsRepo.findBySlug).mockResolvedValue(makeEvent({ id: 1 }))
-    vi.mocked(registrationsRepo.cancel).mockResolvedValue(null)
+    vi.mocked(registrationsRepo.cancel).mockResolvedValue(undefined as any)
 
     await expect(
       registrationsService.cancel({

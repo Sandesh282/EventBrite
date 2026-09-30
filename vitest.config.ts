@@ -21,8 +21,6 @@ import path from "path"
 export default defineConfig({
   test: {
     environment: "node",
-    // Load .env.local for integration tests that need DATABASE_URL
-    envFile: ".env.local",
     globals: true,
     // Shard-friendly: unit tests run first, then integration
     sequence: {
