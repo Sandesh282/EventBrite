@@ -99,7 +99,7 @@ A `UNIQUE(event_id, user_id)` index acts as a second line of defence.
 - **Vitest** with v8 coverage provider
 
 ### CI/CD — GitHub Actions
-- **`ci.yml`** — on every push/PR: `tsc --noEmit` + unit tests
+- **`ci.yml`** — on every push or every PR: `tsc --noEmit` + unit tests
 - **`concurrency.yml`** — post-merge to main: real DB concurrency test (needs `DATABASE_URL` secret)
 
 ---
